@@ -21,6 +21,7 @@
 #' be nearest to the given coordinate).
 #' @param as.data.table Logical. If \code{TRUE}, return result as a
 #' \code{\link[data.table]{data.table}}.
+#'  Defaults to \code{getOption("bomrang.as.data.table")}.
 #'
 #' @details
 #' Station names are not consistently named within the Bureau, so
@@ -75,7 +76,7 @@ get_current_weather <-
            latlon = NULL,
            raw = FALSE,
            emit_latlon_msg = TRUE,
-           as.data.table = FALSE) {
+           as.data.table = getOption("bomrang.as.data.table", FALSE)) {
     # CRAN NOTE avoidance
     JSONurl_site_list <- end <- name <- NULL # nocov
 

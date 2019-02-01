@@ -5,7 +5,8 @@
 \title{Get Current Weather Observations of a BOM Station}
 \usage{
 get_current_weather(station_name, strict = FALSE, latlon = NULL,
-  raw = FALSE, emit_latlon_msg = TRUE, as.data.table = FALSE)
+  raw = FALSE, emit_latlon_msg = TRUE,
+  as.data.table = getOption("bomrang.as.data.table", FALSE))
 }
 \arguments{
 \item{station_name}{The name of the weather station. Fuzzy string matching
@@ -32,7 +33,8 @@ indicating which station was actually used (i.e. which station was found to
 be nearest to the given coordinate).}
 
 \item{as.data.table}{Logical. If \code{TRUE}, return result as a
-\code{\link[data.table]{data.table}}.}
+\code{\link[data.table]{data.table}}.
+ Defaults to \code{getOption("bomrang.as.data.table")}.}
 }
 \value{
 Tidy data frame of requested BOM station's current and prior 72hr data.  For

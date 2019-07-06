@@ -70,6 +70,7 @@ get_historical_for_station <- function(s){
   return(df)
 }
 
+i <- 0
 
 for (s in stations_site_list$site){
   
@@ -77,7 +78,7 @@ for (s in stations_site_list$site){
   # skip if table exists
   # TODO: instead keep track of last updated date and save that information for future update
   if (DBI::dbExistsTable(conn = con, name = s)) {
-    message(paste0("===========Table ", s, "exists =========================="))
+    message(paste0("===========Table ", s, " exists =========================="))
     next
     # message(paste0("Removing existing table ", s))
     # DBI::dbRemoveTable(conn = con, name = s)
@@ -89,7 +90,9 @@ for (s in stations_site_list$site){
     
   # don't write empty df
   if (nrow(df) > 0) {
-    DBI::dbWriteTable(con,  s, df)
+    i <- i + 1
+    DBI::dbWriteTable(con, s, df, fields = df)
+    message(paste0("===========Wrote Table: ", s, " Total: ", i, "========================"))
   }
   
 }

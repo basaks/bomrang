@@ -37,7 +37,6 @@ measures[[1]] <- "rainfall"; measures[[2]] <- "min_temperature"; measures[[3]] <
 
 catch_get_historical <- function(s, t){
   tryCatch(
-    # This is what I want to do...
     {
       df_t <- data.frame(get_historical(s, type = t))
       print(paste0(measures[t], " with length ", nrow(df_t)))
@@ -54,6 +53,22 @@ catch_get_historical <- function(s, t){
   )
 }
 
+get_historical_for_station <- function(s){
+  
+  df <- data.frame()
+  
+  for (t in c("rain", "min", "max", "solar")) {
+    message(paste0("Downloading ", t, " data for station ", s))
+    df_t <- catch_get_historical(s, t)
+    if ((nrow(df_t) > 0) & (nrow(df) > 0 )) {
+      df <- merge(df, df_t, by = c ('year', 'month', 'day'), all = TRUE)
+      } else if ((nrow(df) == 0) & (nrow(df_t) > 0))  {
+        df <- df_t
+      }
+  }
+  
+  return(df)
+}
 
 
 for (s in stations_site_list$site){
@@ -69,19 +84,9 @@ for (s in stations_site_list$site){
   } else {
     message(paste0("=========Downloding Data for table ", s, "==============="))
   }
-  
-  df <- data.frame()
-  
-  for (t in c("rain", "min", "max", "solar")) {
-    message(paste0("Downloading ", t, " data for station ", s))
-    df_t <- catch_get_historical(s, t)
-    if ((nrow(df_t) > 0) & (nrow(df) > 0 )) {
-       df <- merge(df, df_t, by = c ('year', 'month', 'day'), all = TRUE)
-       } else {
-       df <- df_t
-       }
-  }
-  
+
+  df <- get_historical_for_station(s)
+    
   # don't write empty df
   if (nrow(df) > 0) {
     DBI::dbWriteTable(con,  s, df)

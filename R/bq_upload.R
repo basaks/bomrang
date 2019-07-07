@@ -70,10 +70,11 @@ GetHistoricalForStation <- function(s){
   for (t in c("rain", "min", "max", "solar")) {
     message(paste0("Downloading ", t, " data for station ", s))
     df_t <- CatchGetHistorical(s, t)
+    if ((nrow(df) == 0) & (nrow(df_t) > 0)) {
+      df <- df_t
+      }
     if ((nrow(df_t) > 0) & (nrow(df) > 0 )) {
         df <- merge(df, df_t, by = c ('year', 'month', 'day'), all = TRUE)
-      } else if ((nrow(df) == 0) & (nrow(df_t) > 0))  {
-        df <- df_t
       }
   }
   return(df)

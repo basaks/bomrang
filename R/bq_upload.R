@@ -1,5 +1,6 @@
 library(bomrang)
 library(bigrquery)
+library(DBI)
 library(collections)
 
 
@@ -87,7 +88,7 @@ CatchDbWriteTable <- function(con, s, df){
       for (i in 1:10) {
       ret.code <- DBI::dbWriteTable(con, s, df)
       if (ret.code){
-        break
+        return(TRUE)
         }
       }
     },
@@ -95,6 +96,7 @@ CatchDbWriteTable <- function(con, s, df){
       message("The following error occured while writing table:")
       message(error_message)
       message("Continue without this station")
+      return(FALSE)
     }
   )
 }
@@ -130,10 +132,12 @@ for (s in stations_site_list$site) {
     
   # don't write empty df
   if (nrow(df) > 0) {
-    i <- i + 1
     message(paste0("===========Writing Table: ", s, "======================="))
-    CatchDbWriteTable(con, s, df)
-    message(paste0("===========Wrote Table: ", s, " Total: ", i, "=========="))
+    return.code <- CatchDbWriteTable(con, s, df)
+    if (return.code){
+      i <- i + 1
+      message(paste0("===========Wrote Table: ", s, " Total: ",i,"=========="))
+    }
   }
 
 }

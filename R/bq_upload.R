@@ -55,7 +55,7 @@ CatchGetHistorical <- function(s, t){
       return(df_t[df_t$year > 2015, ][, c('year', 'month', 'day',
                                           paste0(measures[t]))])
     },
-    error=function(error_message) {
+    error = function(error_message) {
       message("The following error occured:")
       message(error_message)
       return(data.frame())
@@ -79,14 +79,23 @@ GetHistoricalForStation <- function(s){
   return(df)
 }
 
-MultiDbWriteTable <- function(con, s, df){
+CatchDbWriteTable <- function(con, s, df){
   # try 10 times before giving up
-  for (i in 1:10) {  
-    ret.code <- DBI::dbWriteTable(con, s, df)
-    if (ret.code){
-      break
+  tryCatch(
+    {
+      for (i in 1:10) {
+      ret.code <- DBI::dbWriteTable(con, s, df)
+      if (ret.code){
+        break
+        }
+      }
+    },
+    error = function(error_message){
+      message("The following error occured while writing table:")
+      message(error_message)
+      message("Continue without this station")
     }
-  }
+  )
 }
   
 
@@ -108,12 +117,12 @@ for (s in stations_site_list$site) {
   # TODO: instead keep track of last updated date and save that information
   #  for future update
   if (s %in% downloaded.tables) {
-    message(paste0("===========Table ", s, " exists ========================="))
+    message(paste0("===========Table ", s, " exists ========================"))
     next
     # message(paste0("Removing existing table ", s))
     # DBI::dbRemoveTable(conn = con, name = s)
   } else {
-    message(paste0("=========Downloding Data for table ", s, "==============="))
+    message(paste0("=========Downloding Data for table ", s, "=============="))
   }
 
   df <- GetHistoricalForStation(s)
@@ -121,9 +130,9 @@ for (s in stations_site_list$site) {
   # don't write empty df
   if (nrow(df) > 0) {
     i <- i + 1
-    message()
-    MultiDbWriteTable(con, s, df)
-    message(paste0("===========Wrote Table: ", s, " Total: ", i, "==========="))
+    message(paste0("===========Writing Table: ", s, "======================="))
+    CatchDbWriteTable(con, s, df)
+    message(paste0("===========Wrote Table: ", s, " Total: ", i, "=========="))
   }
 
 }

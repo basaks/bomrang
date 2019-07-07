@@ -1,30 +1,38 @@
-library('bomrang')
-library('bigrquery')
-library('collections')
+library(bomrang)
+library(bigrquery)
+library(collections)
 
-# this brings stations_site_list dataframe
-load('/home/sudiptra/R/x86_64-pc-linux-gnu-library/3.6/bomrang/extdata/stations_site_list.rda')
+
+lib.paths <- .libPaths()
+
+for (p in lib.paths){
+  # check if file exists
+  stations.rda <- file.path(p, 'bomrang', 'extdata', 'stations_site_list.rda')
+  if (file_test("-f", stations.rda)){
+    # this brings stations_site_list dataframe
+    load(stations.rda)
+  }
+}
 
 project <- "wx-bq-poc"
-dataset_name <- "weather"
+dataset.name <- "weather"
 
 con <- DBI::dbConnect(
   bigquery(),
   project = project,
-  dataset = dataset_name,
+  dataset = dataset.name,
   billing = project
 )
 
-stations_table <- "stations_site_list"
+# stations.table <- "stations_site_list"
 
 # remove table if exists
-if (DBI::dbExistsTable(conn = con, name = stations_table)) {
-  message(paste0("Removing existing table ", stations_table))
-  DBI::dbRemoveTable(conn = con, name = stations_table)
-}
+# if (DBI::dbExistsTable(conn = con, name = stations.table)) {
+#   message(paste0("Removing existing table ", stations.table))
+#   DBI::dbRemoveTable(conn = con, name = stations.table)
+# }
 
-# dbListTables(con)
-DBI::dbWriteTable(con, stations_table, stations_site_list)
+# DBI::dbWriteTable(con, stations.table, stations_site_list)
 
 # some connection issue without this line
 httr::set_config(httr::config(http_version = 0))
@@ -32,10 +40,11 @@ httr::set_config(httr::config(http_version = 0))
 # fake a dictionary
 measures <- vector(mode="list", length=4)
 names(measures) <- c("rain", "min", "max", "solar")
-measures[[1]] <- "rainfall"; measures[[2]] <- "min_temperature"; measures[[3]] <- "max_temperature"; measures[[4]] <- "solar_exposure" 
+measures[[1]] <- "rainfall"; measures[[2]] <- "min_temperature"
+measures[[3]] <- "max_temperature"; measures[[4]] <- "solar_exposure"
 
 
-catch_get_historical <- function(s, t){
+CatchGetHistorical <- function(s, t){
   tryCatch(
     {
       df_t <- data.frame(get_historical(s, type = t))
@@ -43,7 +52,8 @@ catch_get_historical <- function(s, t){
       print(paste0("Got this measure: ", measures[t]))
       # drop beyond 2015
       # drop product_code and station_number, first two columns
-      return(df_t[df_t$year > 2015, ][, c('year', 'month', 'day', paste0(measures[t]))])
+      return(df_t[df_t$year > 2015, ][, c('year', 'month', 'day',
+                                          paste0(measures[t]))])
     },
     error=function(error_message) {
       message("The following error occured:")
@@ -53,32 +63,52 @@ catch_get_historical <- function(s, t){
   )
 }
 
-get_historical_for_station <- function(s){
+GetHistoricalForStation <- function(s){
   
   df <- data.frame()
   
   for (t in c("rain", "min", "max", "solar")) {
     message(paste0("Downloading ", t, " data for station ", s))
-    df_t <- catch_get_historical(s, t)
+    df_t <- CatchGetHistorical(s, t)
     if ((nrow(df_t) > 0) & (nrow(df) > 0 )) {
-      df <- merge(df, df_t, by = c ('year', 'month', 'day'), all = TRUE)
+        df <- merge(df, df_t, by = c ('year', 'month', 'day'), all = TRUE)
       } else if ((nrow(df) == 0) & (nrow(df_t) > 0))  {
         df <- df_t
       }
   }
-  
   return(df)
 }
 
+MultiDbWriteTable <- function(con, s, df){
+  # try 10 times before giving up
+  for (i in 1:10) {  
+    ret.code <- DBI::dbWriteTable(con, s, df)
+    if (ret.code){
+      break
+    }
+  }
+}
+  
+
+# get list of downloaded tables
+downloaded.tables <- DBI::dbListTables(con)
+
+# TODO: write a new table in DB with last updated date for each table
+# TODO: write another table for non-current stations, and not download them
+#  agian
+# TODO: write another table with weather type information for each table/station
+
 i <- 0
 
-for (s in stations_site_list$site){
+# TODO: parallelise this loop
+for (s in stations_site_list$site) {
   
   # remove table if exists
   # skip if table exists
-  # TODO: instead keep track of last updated date and save that information for future update
-  if (DBI::dbExistsTable(conn = con, name = s)) {
-    message(paste0("===========Table ", s, " exists =========================="))
+  # TODO: instead keep track of last updated date and save that information
+  #  for future update
+  if (s %in% downloaded.tables) {
+    message(paste0("===========Table ", s, " exists ========================="))
     next
     # message(paste0("Removing existing table ", s))
     # DBI::dbRemoveTable(conn = con, name = s)
@@ -86,13 +116,14 @@ for (s in stations_site_list$site){
     message(paste0("=========Downloding Data for table ", s, "==============="))
   }
 
-  df <- get_historical_for_station(s)
+  df <- GetHistoricalForStation(s)
     
   # don't write empty df
   if (nrow(df) > 0) {
     i <- i + 1
-    DBI::dbWriteTable(con, s, df, fields = df)
-    message(paste0("===========Wrote Table: ", s, " Total: ", i, "========================"))
+    message()
+    MultiDbWriteTable(con, s, df)
+    message(paste0("===========Wrote Table: ", s, " Total: ", i, "==========="))
   }
-  
+
 }

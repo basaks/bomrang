@@ -71,11 +71,14 @@ GetHistoricalForStation <- function(s){
   for (t in c("rain", "min", "max", "solar")) {
     message(paste0("Downloading ", t, " data for station ", s))
     df_t <- CatchGetHistorical(s, t)
-    if ((nrow(df) == 0) & (nrow(df_t) > 0)) {
-      df <- df_t
-      }
-    if ((nrow(df_t) > 0) & (nrow(df) > 0 )) {
-        df <- merge(df, df_t, by = c ('year', 'month', 'day'), all = TRUE)
+    if (nrow(df_t) == 0) {
+      next  #  we got no data, so df can't be updated
+      } else {
+        if (nrow(df) == 0) {  # we got data, and df is empty
+          df <- df_t
+        } else { # we got data, and df is non-empty, merge outer
+          df <- merge(df, df_t, by = c ('year', 'month', 'day'), all = TRUE)
+        }
       }
   }
   return(df)

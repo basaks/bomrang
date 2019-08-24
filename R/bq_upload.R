@@ -105,6 +105,15 @@ CatchDbWriteTable <- function(con, s, df){
 # get list of downloaded tables
 downloaded.tables <- DBI::dbListTables(con)
 
+# table to contain list of active stations
+stale.stations <- 'stale_stations'
+
+if (!DBI::dbExistsTable(conn = con, name = stale.stations)) {
+  message(paste0("does not exist: ", stale.stations))
+}
+
+
+
 # TODO: write a new table in DB with last updated date for each table
 # TODO: write another table for non-current stations, and not download them
 #  agian
@@ -130,7 +139,8 @@ for (s in stations_site_list$site) {
 
   df <- GetHistoricalForStation(s)
     
-  # don't write empty df
+  # don't write empty df as table, instead make a note in table stale_stations,
+  # and do not attempt to download them again
   if (nrow(df) > 0) {
     message(paste0("===========Writing Table: ", s, "======================="))
     return.code <- CatchDbWriteTable(con, s, df)
@@ -138,6 +148,8 @@ for (s in stations_site_list$site) {
       i <- i + 1
       message(paste0("===========Wrote Table: ", s, " Total: ",i,"=========="))
     }
+  } else {
+
   }
 
 }

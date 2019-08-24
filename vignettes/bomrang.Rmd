@@ -305,7 +305,7 @@ Canberra_mintemps <- get_historical(latlon = c(-35.2809, 149.1300),
 ## Using `sweep_for_stations`
 
 `sweep_for_stations()` only takes one argument, `latlon`, a length-2 numeric
-vector. By default, Canberra (approximately).
+vector. By default, this is Canberra (approximately).
 
 ### Results
 
@@ -325,9 +325,38 @@ The fields in the data frame are:
 
 Following is an example sweeping for stations starting with Canberra.
 
-```{r sweep_stations, eval=TRUE}
+```{r sweep_stations, eval=FALSE}
 # Show only the first ten stations in the list
 head(sweep_for_stations(latlon = c(-35.3, 149.2)), 10)
+```
+
+
+## Using `sweep_for_forecast_towns`
+
+`sweep_for_forecast_towns()` only takes one argument, `latlon`, a length-2
+numeric vector. By default, this is Canberra (approximately).
+
+### Results
+
+This function will search for weather stations and return a data frame of all
+weather stations (in this package) sorted by distance from `latlon`, ascending.
+The fields in the data frame are:
+
+**name** - forecast town
+
+**lat** - latitude (decimal degrees)
+
+**lon** - longitude (decimal degrees)
+
+**distance** - distance from provided `latlon` value (kilometres).
+
+### Example  
+
+Following is an example sweeping for forecast towns starting with Canberra.
+
+```{r sweep_forecast, eval=FALSE}
+# Show only the first ten towns in the list
+head(sweep_for_forecast_towns(latlon = c(-35.3, 149.2)), 10)
 ```
 
 ## Using the update functions
@@ -471,8 +500,6 @@ i <- get_satellite_imagery(product_id = avail, scans = 1)
 # Cache image for later use
 i <- get_satellite_imagery(product_id = avail, scans = 1, cache = TRUE)
 
-# load the raster library to work with the GeoTIFF files
-library(raster)
 plot(i)
 ```
 
@@ -564,8 +591,8 @@ r <-
 # `dplyr` compatibility
 
 Some returned objects have been classed as `bomrang_tbl` which allow dispatch for 
-dplyr methods, e.g. `mutate`, `filter`, `select`, `arrange`, `slice`, `rename`, and 
-`group_by` while preserving the header information.
+dplyr methods, _e.g._ `mutate`, `filter`, `select`, `arrange`, `slice`,
+`rename`, and `group_by` while preserving the header information.
 
 For example:
 

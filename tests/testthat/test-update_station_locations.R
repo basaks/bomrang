@@ -6,11 +6,11 @@ test_that("update_station_locations() stops if 'no'", {
   skip_on_cran()
   
   f <- file()
-  options(bomrang_connection = f)
-  ans <- "no"
-  write(ans, f)
+  options(bomrang.connection = f)
+  answer <- "no"
+  write(answer, f)
   expect_error(update_station_locations())
-  options(bomrang_connection = stdin())
+  options(bomrang.connection = stdin())
   close(f)
 })
 
@@ -21,7 +21,7 @@ test_that("update_station_locations() downloads and imports the proper file",
             skip_on_cran()
             
             f <- file()
-            options(bomrang_connection = f)
+            options(bomrang.connection = f)
             ans <- "yes"
             write(ans, f)
             update_station_locations()
@@ -75,7 +75,7 @@ test_that("update_station_locations() downloads and imports the proper file",
             )
             
             # reset connection
-            options(bomrang_connection = stdin())
+            options(bomrang.connection = stdin())
             # close the file
             close(f)
           })

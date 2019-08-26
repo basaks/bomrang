@@ -103,23 +103,46 @@ CatchDbWriteTable <- function(con, s, df){
     }
   )
 }
-  
+
+dropped_columns <- c("year","month", "day")
+
+ReplaceByISOdate <- function(df, last_updated){
+
+  # keep information from last_updated date, only the relevant bit that does
+  # not exist in BQ
+  # also convert year, month and day into date
+  # drop year month and day
+  df$date <- as.Date(ISOdate(df$year, df$month, df$day))
+  if (length(last_updated) == 0) {
+    message(paste0("No last updated date available for this station"))
+    return (df[, !(names(df) %in% dropped_columns)])
+  } else {
+    return(df[, !(names(df) %in% dropped_columns)][df$date > last_updated])
+  }
+}
 
 # get list of downloaded tables
 downloaded.tables <- DBI::dbListTables(con)
 
 # table to contain list of active stations
 stale.stations <- 'stale_stations'
+last.update.table <- 'last_update_date'
 
 if (!DBI::dbExistsTable(conn = con, name = stale.stations)) {
   message(paste0("does not exist: ", stale.stations))
+  stale_sts <- c()
+} else {
+  stale_sts <- DBI::dbReadTable(con, stale.stations)$station
 }
 
+if (!DBI::dbExistsTable(conn = con, name = last.update.table)) {
+  message(paste0("does not exist: ", last.update.table))
+  last.update.date <- data.frame(station=character(),
+                                 last_updated=as.Date(character()))
+} else {
+  last.update.date <- DBI::dbReadTable(con, last.update.table)
+}
 
-
-# TODO: write a new table in DB with last updated date for each table
-# TODO: write another table for non-current stations, and not download them
-#  agian
 # TODO: write another table with weather type information for each table/station
 
 i <- 0
@@ -131,8 +154,8 @@ for (s in stations_site_list$site) {
   # skip if table exists
   # TODO: instead keep track of last updated date and save that information
   #  for future update
-  if (s %in% downloaded.tables) {
-    message(paste0("===========Table ", s, " exists ========================"))
+  if ((s %in% downloaded.tables) | (s %in% stale_sts)) {
+    message(paste0("====Table ", s, " exists or in stale stations list======"))
     next
     # message(paste0("Removing existing table ", s))
     # DBI::dbRemoveTable(conn = con, name = s)
@@ -145,6 +168,29 @@ for (s in stations_site_list$site) {
   # don't write empty df as table, instead make a note in table stale_stations,
   # and do not attempt to download them again
   if (nrow(df) > 0) {
+
+    # create table to write
+    df <- ReplaceByISOdate(
+      df,
+      last.update.date$last_updated[last.update.date$station == s]
+    )
+
+    # update last_update_date table
+    s_df = data.frame(station=c(s),
+                      last_updated = c(max(df$date)),
+                      stringsAsFactors=FALSE)
+
+    upload_job <- insert_upload_job(project = project,
+                                    dataset = dataset.name,
+                                    table = last.update.table,
+                                    values = s_df,
+                                    create_disposition = "CREATE_IF_NEEDED",
+                                    write_disposition = "WRITE_APPEND")
+
+    wait_for(upload_job)
+
+    message(paste0("=====Updated last update date for stations ", s))
+
     message(paste0("===========Writing Table: ", s, "======================="))
     return.code <- CatchDbWriteTable(con, s, df)
     if (return.code){
@@ -152,7 +198,14 @@ for (s in stations_site_list$site) {
       message(paste0("===========Wrote Table: ", s, " Total: ",i,"=========="))
     }
   } else {
-
+    s_df = data.frame(station=c(s), stringsAsFactors=FALSE)
+    upload_job <- insert_upload_job(project = project,
+                                    dataset = dataset.name,
+                                    table = stale.stations,
+                                    values = s_df,
+                                    create_disposition = "CREATE_IF_NEEDED",
+                                    write_disposition = "WRITE_APPEND")
+    wait_for(upload_job)
+    message(paste0("Added ", s, " into state stations table"))
   }
-
 }

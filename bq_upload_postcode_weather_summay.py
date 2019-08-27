@@ -1,88 +1,40 @@
-from typing import Dict
+import logging
+from itertools import compress
+from typing import Dict, List
 from scipy.spatial import cKDTree
+from pathlib import Path
 import numpy as np
 import pandas as pd
-from google.cloud import bigquery
-from google.cloud.bigquery import Client, TableReference, DatasetReference
-from google.cloud.exceptions import NotFound
-from google.cloud import bigquery_storage_v1beta1
-from google.auth import default
+from google.cloud.bigquery import TableReference
+from gcputils.bqclient import BQClient
+from bwsresponse import logger
+
+logger.configure(verbosity=logging.DEBUG)
+log = logging.getLogger(__name__)
+
 
 weather_data_types = ['rainfall',
                       'min_temperature',
                       'max_temperature',
                       'solar_exposure']
 
-def bq_table_exists(client: Client, table_ref: TableReference) -> bool:
-    """
-    :param client:
-    :param table_ref:
-    :return:
-    """
-    try:
-        client.get_table(table_ref)
-        return True
-    except NotFound:
-        return False
-
-
-def dataset_exists(client: Client, dataset_reference: DatasetReference) \
-        -> bool:
-    """
-    copied from:
-    https://github.com/googleapis/google-cloud-python/blob/7ba0220ff9d0d68241baa863b3152c34dc9f7a1a/bigquery/docs/snippets.py#L178
-    Return True if a dataset exists.
-
-    Args:
-        client (google.cloud.bigquery.client.Client):
-            A client to connect to the BigQuery API.
-        dataset_reference (google.cloud.bigquery.dataset.DatasetReference):
-            A reference to the dataset to look for.
-
-    Returns:
-        bool: ``True`` if the dataset exists, ``False`` otherwise.
-    """
-    try:
-        client.get_dataset(dataset_reference)
-        return True
-    except NotFound:
-        return False
-
-
-def get_df_from_query(bqclient: bigquery.Client, query_string: str) \
-        -> pd.DataFrame:
-
-    # Download query results.
-    dataframe = (
-        bqclient.query(query_string)
-            .result()
-            # Note: The BigQuery Storage API cannot be used to download small query
-            # results, but as of google-cloud-bigquery version 1.11.1, the
-            # to_dataframe method will fallback to the tabledata.list API when the
-            # BigQuery Storage API fails to read the query results.
-            .to_dataframe(bqstorage_client=bqstorageclient)
-    )
-    return dataframe
-
-
-def __create_date_index():
-    return pd.DataFrame(index=pd.date_range('2016-01-01', '2019-06-30',
-                                            freq='D'))
-
 
 def download_all_stations_data(stations: pd.DataFrame) -> \
         Dict[str, pd.DataFrame]:
+
+    df_index = pd.DataFrame(index=pd.date_range('2016-01-01', '2019-06-30',
+                                                freq='D'))
 
     def __inner(s, i):
         # check if weather station (data) exists in BQ
         # not all stations are active now/data may not be available
         # Supply NaN's for missing weather columns
 
-        print(f"Download data for station: {i}, site: {s}")
+        log.info(f"Download data for station: {i}, site: {s}")
         this_station_ref = TableReference(dataset_ref_, str(s))
-        if bq_table_exists(bqclient_, this_station_ref):
-            df = bqclient_.list_rows(this_station_ref).to_dataframe(
-                bqstorage_client=bqstorageclient)
+        if bqclient.table_exists(this_station_ref):
+            df = bqclient.client.list_rows(this_station_ref).to_dataframe(
+                bqstorage_client=bqclient.storage_client)
             df.index = df.apply(lambda x: pd.datetime(
                 int(x['year']), int(x['month']), int(x['day'])), axis=1)
 
@@ -97,78 +49,105 @@ def download_all_stations_data(stations: pd.DataFrame) -> \
     return {s: __inner(s, i) for i, s in enumerate(stations.site)}
 
 
-def __df_nan_mean(dfs, weights):
+def __df_nan_mean(dfs: List[pd.DataFrame], weights: List[float]) \
+        -> pd.DataFrame:
+
+    # check empty table, i.e., this station data is not in BQ
+    non_empty_dfs = [True if df.shape[0] else False for df in dfs]
+    dfs = list(compress(dfs, non_empty_dfs))
+    weights = list(compress(weights, non_empty_dfs))
+
     # make sure dfs contain same columns
     for df in dfs[1:]:
         assert set(dfs[0].columns).__eq__(set(df.columns))
 
     df_mean = pd.DataFrame({'date': dfs[0].index.date})
 
+    # TODO: make sure at least 3 stations have data
     for c in dfs[0].columns:
         data = np.vstack([df[c] for df in dfs])
-        masked_data = np.ma.masked_array(data, np.isnan(data))
-        df_mean[c] = np.ma.average(masked_data, weights=weights, axis=0)
+        masked_data = np.ma.masked_array(data=data, mask=np.isnan(data),
+                                         dtype=np.float32)
+        avg_data = np.ma.average(masked_data, weights=weights, axis=0)
+        df_mean[c] = avg_data.filled(np.nan)
 
     return df_mean
 
 
 if __name__ == '__main__':
-    credentials, your_project_id = default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
 
-    # Make clients.
-    bqclient_ = bigquery.Client(credentials=credentials,
-                                project=your_project_id)
-
-    bqstorageclient = bigquery_storage_v1beta1.BigQueryStorageClient(
-        credentials=credentials)
+    bqclient = BQClient()
 
     dataset_id = 'weather'
-    dataset_ref_ = bqclient_.dataset(dataset_id)
+    dataset_ref_ = bqclient.client.dataset(dataset_id)
 
     stations_ref = TableReference(dataset_ref_, 'stations_site_list')
 
     # https://www.matthewproctor.com/australian_postcodes
     postcodes_ref = TableReference(dataset_ref_, 'australian_postcodes')
 
-    stations = bqclient_.list_rows(stations_ref).to_dataframe(
-        bqstorage_client=bqstorageclient)
+    stations = bqclient.client.list_rows(stations_ref).to_dataframe(
+        bqstorage_client=bqclient.storage_client)
 
-    postcodes = bqclient_.list_rows(postcodes_ref).to_dataframe(
-        bqstorage_client=bqstorageclient)
+    postcodes = bqclient.client.list_rows(postcodes_ref).to_dataframe(
+        bqstorage_client=bqclient.storage_client)
 
-    kdtree = cKDTree(stations[['lat', 'lon']].head(10))
+    kdtree = cKDTree(stations[['lat', 'lon']])
 
-    df_index = __create_date_index()
+    weather_file_on_disc = 'historical_weather.pk'
+    import pickle
+    if Path(weather_file_on_disc).exists():
+        historical_weather = pickle.load(open('historical_weather.pk', 'rb'))
+    else:
+        historical_weather = download_all_stations_data(stations)
+        pickle.dump(historical_weather, open('historical_weather.pk', 'wb'))
 
-    historical_weather = download_all_stations_data(stations.head(10))
+    all_postcodes_table = 'historical_weather'
 
-    # import IPython; IPython.embed(); import sys; sys.exit()
+    hist_table_ref = TableReference(dataset_ref_, all_postcodes_table)
 
-    postcode_ds = 'postcode'
-    postcode_ds_ref = bqclient_.dataset(postcode_ds)
+    if bqclient.table_exists(table_reference=hist_table_ref):
+        log.info(f"Table {all_postcodes_table} exist. Deleting Table.")
+        bqclient.client.delete_table(hist_table_ref, not_found_ok=True)
+    else:
+        log.info(f"Table {all_postcodes_table} does not exist. "
+                 f"New table will be created")
 
-    bqclient_.create_dataset(postcode_ds_ref, exists_ok=True)
+    total_postcodes = postcodes.shape[0]
+
+    already_inserted = set()
+
+    to_be_inserted = []
 
     for i, p in enumerate(postcodes.itertuples()):
-        if i == 3: break
-        lat_long = (p.lat, p.long)
-        station_dists, stations_indices = kdtree.query(lat_long, k=3)
-        selected_station_sites = stations.site[stations_indices]
+        try:
+            lat_long = (float(p.lat), float(p.long))
+            log.info(f"Interpolating data for postcode {p.postcode} and "
+                     f"lat/long {lat_long}: {i + 1} of {total_postcodes}")
+            if p.postcode in already_inserted:
+                log.info(f"Data for postcode {p.postcode} already inserted")
+                continue
+            else:
+                already_inserted.add(p.postcode)
+                log.info(f"Interpolating data for postcode: {p.postcode}")
 
-        selected_historical_weather = [historical_weather[s]
-                                       for s in selected_station_sites]
-        p_df = __df_nan_mean(selected_historical_weather, 1/station_dists)
+            # try 20 closest stations
+            station_dists, stations_indices = kdtree.query(lat_long, k=25)
+            selected_station_sites = stations.site[stations_indices]
 
-        p_table_ref = TableReference(postcode_ds_ref, str(str(p.postcode)))
+            selected_historical_weather = [historical_weather[s]
+                                           for s in selected_station_sites]
+            p_df = __df_nan_mean(selected_historical_weather,
+                                 1/station_dists**4)
+            cols = p_df.columns
+            p_df['postcode'] = p.postcode
+            p_df = p_df[['postcode'] + list(cols)]
+            to_be_inserted.append(p_df)
+        except ValueError:
+            log.debug(f"Supplied lat/long {p}")
+            log.debug("Invalid lat/long Supplied. May be this is a PO Box?")
 
-        if bq_table_exists(bqclient_, table_ref=p_table_ref):
-            bqclient_.delete_table(p_table_ref)
-        print("Deleted table '{}'.".format(p_table_ref))
+    final_df = pd.concat(to_be_inserted)
 
-        load_job = bqclient_.load_table_from_dataframe(p_df, p_table_ref)
-        print(f"Starting  upload job for postcode {p.postcode}, "
-              f"job id: {load_job.job_id}")
-        load_job.result()  # Waits for table load to complete.
-        print(f"Upload Job for Postcode {p.postcode} finished.")
+    # write table into BQ
+    bqclient.df_to_bq(final_df, hist_table_ref)

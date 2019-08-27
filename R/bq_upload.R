@@ -95,22 +95,23 @@ CatchDbWriteTable <- function(con, s, df){
   )
 }
 
-dropped_columns <- c("year","month", "day")
+dropped.columns <- c("year","month", "day")
 earliest.date <- as.Date(ISOdate(1990, 1, 1))
 
-ReplaceByISOdate <- function(df, last_updated){
+ReplaceByISOdate <- function(df, last.updated){
 
   # keep information from last_updated date, only the relevant bit that does
   # not exist in BQ
   # also convert year, month and day into date
   # drop year month and day
   df$date <- as.Date(ISOdate(df$year, df$month, df$day))
-  if (length(last_updated) == 0) {
-    message(paste0("No last updated date available for this station"))
-    return (df[, !(names(df) %in% dropped_columns)])
-  } else {
-    return(df[, !(names(df) %in% dropped_columns)][df$date > last_updated])
-  }
+  # if (length(last.updated) == 0) {
+  #   message(paste0("No last updated date available for this station"))
+  #   return (df[, !(names(df) %in% dropped.columns)])
+  # } else {
+  #   return(df[, !(names(df) %in% dropped.columns)][df$date > last.updated])
+  # }
+  return(df[, !(names(df) %in% dropped.columns)])
 }
 
 # get list of downloaded tables
@@ -215,9 +216,10 @@ for (s in stations_site_list$site) {
     message(paste0("=========Downloding Data for table ", s, "=============="))
   }
 
-  df <- GetHistoricalForStation(s)
+  # if last_update_date for table is same day skip, else keep going
 
-  UpdateLastUpdatedTable(s, df)
+  # download data from BOM
+  df <- GetHistoricalForStation(s)
 
   # don't write empty df as table, instead make a note in table stale_stations,
   # and do not attempt to download them again
@@ -228,6 +230,8 @@ for (s in stations_site_list$site) {
       df,
       last.update.date$last_updated[last.update.date$station == s]
     )
+
+    # UpdateLastUpdatedTable(s, df)
 
     message(paste0("===========Writing Table: ", s, "======================="))
     return.code <- CatchDbWriteTable(con, s, df)

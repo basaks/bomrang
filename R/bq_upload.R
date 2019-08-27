@@ -3,17 +3,8 @@ library(bigrquery)
 library(DBI)
 library(collections)
 
-
-lib.paths <- .libPaths()
-
-for (p in lib.paths){
-  # check if file exists
-  stations.rda <- file.path(p, 'bomrang', 'extdata', 'stations_site_list.rda')
-  if (file_test("-f", stations.rda)){
-    # this brings stations_site_list dataframe
-    load(stations.rda)
-  }
-}
+stations_site_list <- end <- name <- NULL
+load(system.file("extdata", 'stations_site_list.rda', package = "bomrang"))
 
 project <- "wx-bq-poc"
 dataset.name <- "weather"
@@ -65,9 +56,9 @@ CatchGetHistorical <- function(s, t){
 }
 
 GetHistoricalForStation <- function(s){
-  
+
   df <- data.frame()
-  
+
   for (t in c("rain", "min", "max", "solar")) {
     message(paste0("Downloading ", t, " data for station ", s))
     df_t <- CatchGetHistorical(s, t)
@@ -105,6 +96,7 @@ CatchDbWriteTable <- function(con, s, df){
 }
 
 dropped_columns <- c("year","month", "day")
+earliest.date <- as.Date(ISOdate(1990, 1, 1))
 
 ReplaceByISOdate <- function(df, last_updated){
 
@@ -143,17 +135,77 @@ if (!DBI::dbExistsTable(conn = con, name = last.update.table)) {
   last.update.date <- DBI::dbReadTable(con, last.update.table)
 }
 
+
+CatchMaxDate  <- function(df) {
+    tryCatch(
+    {
+        max.date <- max(df$date)
+        return(max.date)
+    },
+    error = function(error_message){
+        message("The following error occured while writing table:")
+        message(error_message)
+        message("Continue without this station")
+        return(earliest.date)
+    }
+    )
+}
+
+
+UpdateLastUpdatedTable <- function(s, df) {
+    # update last_update_date table
+
+    max.date <- CatchMaxDate(df)
+
+    s_df = data.frame(
+        station=c(s),
+        last_updated = max.date,
+        stringsAsFactors=FALSE
+    )
+
+    upload_job <- insert_upload_job(
+        project = project,
+        dataset = dataset.name,
+        table = last.update.table,
+        values = s_df,
+        create_disposition = "CREATE_IF_NEEDED",
+        write_disposition = "WRITE_APPEND"
+    )
+
+    wait_for(upload_job)
+
+    message(paste0("=====Updated last update date for stations ", s))
+}
+
+
+UpdateStaleStations <- function(s) {
+    s_df = data.frame(
+        station=c(s),
+        stringsAsFactors=FALSE
+    )
+
+    upload_job <- insert_upload_job(
+        project = project,
+        dataset = dataset.name,
+        table = stale.stations,
+        values = s_df,
+        create_disposition = "CREATE_IF_NEEDED",
+        write_disposition = "WRITE_APPEND"
+    )
+    wait_for(upload_job)
+
+    message(paste0("Added ", s, " into state stations table"))
+}
+
 # TODO: write another table with weather type information for each table/station
 
 i <- 0
 
 # TODO: parallelise this loop
 for (s in stations_site_list$site) {
-  
+
   # remove table if exists
   # skip if table exists
-  # TODO: instead keep track of last updated date and save that information
-  #  for future update
   if ((s %in% downloaded.tables) | (s %in% stale_sts)) {
     message(paste0("====Table ", s, " exists or in stale stations list======"))
     next
@@ -164,7 +216,9 @@ for (s in stations_site_list$site) {
   }
 
   df <- GetHistoricalForStation(s)
-    
+
+  UpdateLastUpdatedTable(s, df)
+
   # don't write empty df as table, instead make a note in table stale_stations,
   # and do not attempt to download them again
   if (nrow(df) > 0) {
@@ -175,22 +229,6 @@ for (s in stations_site_list$site) {
       last.update.date$last_updated[last.update.date$station == s]
     )
 
-    # update last_update_date table
-    s_df = data.frame(station=c(s),
-                      last_updated = c(max(df$date)),
-                      stringsAsFactors=FALSE)
-
-    upload_job <- insert_upload_job(project = project,
-                                    dataset = dataset.name,
-                                    table = last.update.table,
-                                    values = s_df,
-                                    create_disposition = "CREATE_IF_NEEDED",
-                                    write_disposition = "WRITE_APPEND")
-
-    wait_for(upload_job)
-
-    message(paste0("=====Updated last update date for stations ", s))
-
     message(paste0("===========Writing Table: ", s, "======================="))
     return.code <- CatchDbWriteTable(con, s, df)
     if (return.code){
@@ -198,14 +236,6 @@ for (s in stations_site_list$site) {
       message(paste0("===========Wrote Table: ", s, " Total: ",i,"=========="))
     }
   } else {
-    s_df = data.frame(station=c(s), stringsAsFactors=FALSE)
-    upload_job <- insert_upload_job(project = project,
-                                    dataset = dataset.name,
-                                    table = stale.stations,
-                                    values = s_df,
-                                    create_disposition = "CREATE_IF_NEEDED",
-                                    write_disposition = "WRITE_APPEND")
-    wait_for(upload_job)
-    message(paste0("Added ", s, " into state stations table"))
+    UpdateStaleStations(s)
   }
 }

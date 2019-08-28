@@ -5,11 +5,11 @@ from scipy.spatial import cKDTree
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from datetime import datetime
 from google.cloud.bigquery import TableReference
 from gcputils.bqclient import BQClient
-from bwsresponse import logger
 
-logger.configure(verbosity=logging.DEBUG)
+
 log = logging.getLogger(__name__)
 
 
@@ -19,10 +19,15 @@ weather_data_types = ['rainfall',
                       'solar_exposure']
 
 
+def convert_to_datetime(x):
+    d = datetime.strptime(x['date'], format='%Y-%m-%d')
+    return d
+
+
 def download_all_stations_data(stations: pd.DataFrame) -> \
         Dict[str, pd.DataFrame]:
 
-    df_index = pd.DataFrame(index=pd.date_range('2016-01-01', '2019-06-30',
+    df_index = pd.DataFrame(index=pd.date_range('2016-01-01', '2019-08-25',
                                                 freq='D'))
 
     def __inner(s, i):
@@ -35,8 +40,7 @@ def download_all_stations_data(stations: pd.DataFrame) -> \
         if bqclient.table_exists(this_station_ref):
             df = bqclient.client.list_rows(this_station_ref).to_dataframe(
                 bqstorage_client=bqclient.storage_client)
-            df.index = df.apply(lambda x: pd.datetime(
-                int(x['year']), int(x['month']), int(x['day'])), axis=1)
+            df.index = pd.DatetimeIndex(df['date'])
 
             for dt in weather_data_types:
                 if dt not in df.columns:
@@ -46,7 +50,7 @@ def download_all_stations_data(stations: pd.DataFrame) -> \
             return df[weather_data_types]
         return pd.DataFrame()  # else return empty dataframe
 
-    return {s: __inner(s, i) for i, s in enumerate(stations.site)}
+    return {s: __inner(s, i) for i, s in enumerate(stations.site[:10])}
 
 
 def __df_nan_mean(dfs: List[pd.DataFrame], weights: List[float]) \
@@ -74,7 +78,24 @@ def __df_nan_mean(dfs: List[pd.DataFrame], weights: List[float]) \
     return df_mean
 
 
+def _setup_logging():
+    log = logging.getLogger('simple_example')
+    log.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    # create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    # add formatter to ch
+    ch.setFormatter(formatter)
+    # add ch to logger
+    log.addHandler(ch)
+    return log
+
+
 if __name__ == '__main__':
+
+    log = _setup_logging()
 
     bqclient = BQClient()
 
@@ -102,7 +123,7 @@ if __name__ == '__main__':
         historical_weather = download_all_stations_data(stations)
         pickle.dump(historical_weather, open('historical_weather.pk', 'wb'))
 
-    all_postcodes_table = 'historical_weather'
+    all_postcodes_table = 'historical_weather_08_27'
 
     hist_table_ref = TableReference(dataset_ref_, all_postcodes_table)
 

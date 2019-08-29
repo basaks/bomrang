@@ -200,11 +200,11 @@ UpdateStaleStations <- function(s) {
 
 # TODO: write another table with weather type information for each table/station
 write_count <- 0
-
+sites <- stations_site_list$site
 # TODO: parallelise this loop
 # need to create a DB connetion for each worker
 # can follow this: https://stackoverflow.com/a/24634121/3321542
-for (s in stations_site_list$site[1000:2000]) {
+for (s in sample(sites, size=length(sites), replace=FALSE)) {
   # skip if table exists
   if ((s %in% downloaded.tables) | (s %in% stale_sts) |
     (DBI::dbExistsTable(con, s))) {

@@ -1,0 +1,3 @@
+[submodule "gcputils"]
+	path = gcputils
+	url = https://github.com/basaks/gcputils

@@ -98,7 +98,7 @@ CatchDbWriteTable <- function(con, s, df){
 dropped.columns <- c("year","month", "day")
 earliest.date <- as.Date(ISOdate(1990, 1, 1))
 
-ReplaceByISOdate <- function(df, last.updated){
+ReplaceByISOdate <- function(df){
 
   # keep information from last_updated date, only the relevant bit that does
   # not exist in BQ
@@ -199,15 +199,15 @@ UpdateStaleStations <- function(s) {
 }
 
 # TODO: write another table with weather type information for each table/station
-
-i <- 0
+write_count <- 0
 
 # TODO: parallelise this loop
-for (s in stations_site_list$site) {
-
-  # remove table if exists
+# need to create a DB connetion for each worker
+# can follow this: https://stackoverflow.com/a/24634121/3321542
+for (s in stations_site_list$site[1000:2000]) {
   # skip if table exists
-  if ((s %in% downloaded.tables) | (s %in% stale_sts)) {
+  if ((s %in% downloaded.tables) | (s %in% stale_sts) |
+    (DBI::dbExistsTable(con, s))) {
     message(paste0("====Table ", s, " exists or in stale stations list======"))
     next
     # message(paste0("Removing existing table ", s))
@@ -226,18 +226,19 @@ for (s in stations_site_list$site) {
   if (nrow(df) > 0) {
 
     # create table to write
-    df <- ReplaceByISOdate(
-      df,
-      last.update.date$last_updated[last.update.date$station == s]
-    )
+    # df <- ReplaceByISOdate(df)
 
     # UpdateLastUpdatedTable(s, df)
 
     message(paste0("===========Writing Table: ", s, "======================="))
     return.code <- CatchDbWriteTable(con, s, df)
+
     if (return.code){
-      i <- i + 1
-      message(paste0("===========Wrote Table: ", s, " Total: ",i,"=========="))
+      write_count <- write_count + 1
+      message(paste0("===========Wrote Table: ", s, " Total: ", write_count,
+      "=========="))
+    } else {
+      UpdateStaleStations(s)
     }
   } else {
     UpdateStaleStations(s)

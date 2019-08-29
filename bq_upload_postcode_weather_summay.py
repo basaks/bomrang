@@ -3,6 +3,7 @@ from itertools import compress
 from typing import Dict, List
 from scipy.spatial import cKDTree
 from pathlib import Path
+from joblib import Parallel, delayed
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -12,11 +13,15 @@ from gcputils.bqclient import BQClient
 
 log = logging.getLogger(__name__)
 
+RAINFALL = 'rainfall'
+MIN_TEMPERATURE = 'min_temperature'
+MAX_TEMPERATURE = 'max_temperature'
+SOLAR_EXPOSURE = 'solar_exposure'
 
-weather_data_types = ['rainfall',
-                      'min_temperature',
-                      'max_temperature',
-                      'solar_exposure']
+weather_data_types = [RAINFALL,
+                      MIN_TEMPERATURE,
+                      MAX_TEMPERATURE,
+                      SOLAR_EXPOSURE]
 
 
 def convert_to_datetime(x):
@@ -29,18 +34,21 @@ def download_all_stations_data(stations: pd.DataFrame) -> \
 
     df_index = pd.DataFrame(index=pd.date_range('2016-01-01', '2019-08-25',
                                                 freq='D'))
+    sites = stations['site']
 
     def __inner(s, i):
+        bqclient_ = BQClient()
         # check if weather station (data) exists in BQ
         # not all stations are active now/data may not be available
         # Supply NaN's for missing weather columns
 
         log.info(f"Download data for station: {i}, site: {s}")
         this_station_ref = TableReference(dataset_ref_, str(s))
-        if bqclient.table_exists(this_station_ref):
-            df = bqclient.client.list_rows(this_station_ref).to_dataframe(
-                bqstorage_client=bqclient.storage_client)
-            df.index = pd.DatetimeIndex(df['date'])
+        if bqclient_.table_exists(this_station_ref):
+            df = bqclient_.client.list_rows(this_station_ref).to_dataframe(
+                bqstorage_client=bqclient_.storage_client)
+            df.index = df.apply(lambda x: pd.datetime(
+                int(x['year']), int(x['month']), int(x['day'])), axis=1)
 
             for dt in weather_data_types:
                 if dt not in df.columns:
@@ -50,7 +58,10 @@ def download_all_stations_data(stations: pd.DataFrame) -> \
             return df[weather_data_types]
         return pd.DataFrame()  # else return empty dataframe
 
-    return {s: __inner(s, i) for i, s in enumerate(stations.site[:10])}
+    inners = Parallel(n_jobs=20)(delayed(__inner)(s, i)
+                                 for i, s in enumerate(sites))
+
+    return {s: inners[i] for i, s in enumerate(sites)}
 
 
 def __df_nan_mean(dfs: List[pd.DataFrame], weights: List[float]) \
@@ -79,7 +90,7 @@ def __df_nan_mean(dfs: List[pd.DataFrame], weights: List[float]) \
 
 
 def _setup_logging():
-    log = logging.getLogger('simple_example')
+    log = logging.getLogger('')
     log.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG)
@@ -107,11 +118,9 @@ if __name__ == '__main__':
     # https://www.matthewproctor.com/australian_postcodes
     postcodes_ref = TableReference(dataset_ref_, 'australian_postcodes')
 
-    stations = bqclient.client.list_rows(stations_ref).to_dataframe(
-        bqstorage_client=bqclient.storage_client)
+    stations = bqclient.bq_to_df(stations_ref)
 
-    postcodes = bqclient.client.list_rows(postcodes_ref).to_dataframe(
-        bqstorage_client=bqclient.storage_client)
+    postcodes = bqclient.bq_to_df(postcodes_ref)
 
     kdtree = cKDTree(stations[['lat', 'lon']])
 

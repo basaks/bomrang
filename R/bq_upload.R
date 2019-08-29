@@ -208,6 +208,7 @@ cl <- makePSOCKcluster(20)
 registerDoParallel(cl)
 
 clusterEvalQ(cl, {
+    library('bomrang')
     library('bigrquery')
     project <- "wx-bq-poc"
     dataset.name <- "weather"
@@ -224,7 +225,7 @@ clusterEvalQ(cl, {
 # followed this: https://stackoverflow.com/a/24634121/3321542
 foreach(s=sites, .inorder=FALSE,
         .noexport="con",
-        .packages=c("DBI", "bigrquery")) %dopar% {
+        .packages=c("DBI", "bigrquery", "bomrang")) %dopar% {
   # skip if table exists
   if ((s %in% downloaded.tables) | (s %in% stale_sts) |
     (DBI::dbExistsTable(con, s))) {

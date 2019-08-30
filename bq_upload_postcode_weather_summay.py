@@ -1,4 +1,5 @@
 import logging
+from collections import ChainMap
 from itertools import compress
 from typing import Dict, List
 from scipy.spatial import cKDTree
@@ -24,29 +25,25 @@ weather_data_types = [RAINFALL,
                       SOLAR_EXPOSURE]
 
 
-def convert_to_datetime(x):
-    d = datetime.strptime(x['date'], format='%Y-%m-%d')
-    return d
-
-
 def download_all_stations_data(stations: pd.DataFrame) -> \
         Dict[str, pd.DataFrame]:
 
-    df_index = pd.DataFrame(index=pd.date_range('2016-01-01', '2019-08-25',
+    df_index = pd.DataFrame(index=pd.date_range('2016-01-01', '2019-08-29',
                                                 freq='D'))
     sites = stations['site']
 
-    def __inner(s, i):
-        bqclient_ = BQClient()
+    def __inner(s, i, client):
         # check if weather station (data) exists in BQ
         # not all stations are active now/data may not be available
         # Supply NaN's for missing weather columns
 
         log.info(f"Download data for station: {i}, site: {s}")
         this_station_ref = TableReference(dataset_ref_, str(s))
-        if bqclient_.table_exists(this_station_ref):
-            df = bqclient_.client.list_rows(this_station_ref).to_dataframe(
-                bqstorage_client=bqclient_.storage_client)
+        if client.table_exists(this_station_ref):
+            df = client.bq_to_df(this_station_ref)
+            # remove any null year/month/day, sometimes we get dirty data
+            df = df[(~df['year'].isnull()) & (~df['month'].isnull()) & (~df[
+                'day'].isnull())]
             df.index = df.apply(lambda x: pd.datetime(
                 int(x['year']), int(x['month']), int(x['day'])), axis=1)
 
@@ -58,10 +55,17 @@ def download_all_stations_data(stations: pd.DataFrame) -> \
             return df[weather_data_types]
         return pd.DataFrame()  # else return empty dataframe
 
-    inners = Parallel(n_jobs=20)(delayed(__inner)(s, i)
-                                 for i, s in enumerate(sites))
+    def __process_inner(p, processes, sites):
+        this_p_sites = np.array_split(sites, processes)[p]
+        this_p_client = BQClient()
+        return {s: __inner(s, i, this_p_client) for i, s in enumerate(
+            this_p_sites)}
 
-    return {s: inners[i] for i, s in enumerate(sites)}
+    processes = 30
+    p_inners = Parallel(n_jobs=processes)(delayed(__process_inner)(
+        p, processes, sites) for p in range(processes))
+
+    return dict(ChainMap(*p_inners))
 
 
 def __df_nan_mean(dfs: List[pd.DataFrame], weights: List[float]) \
@@ -127,10 +131,10 @@ if __name__ == '__main__':
     weather_file_on_disc = 'historical_weather.pk'
     import pickle
     if Path(weather_file_on_disc).exists():
-        historical_weather = pickle.load(open('historical_weather.pk', 'rb'))
+        historical_weather = pickle.load(open(weather_file_on_disc, 'rb'))
     else:
         historical_weather = download_all_stations_data(stations)
-        pickle.dump(historical_weather, open('historical_weather.pk', 'wb'))
+        pickle.dump(historical_weather, open(weather_file_on_disc, 'wb'))
 
     all_postcodes_table = 'historical_weather_08_27'
 
@@ -150,6 +154,7 @@ if __name__ == '__main__':
     to_be_inserted = []
 
     for i, p in enumerate(postcodes.itertuples()):
+        print("=======Postcode: "*3, p)
         try:
             lat_long = (float(p.lat), float(p.long))
             log.info(f"Interpolating data for postcode {p.postcode} and "
@@ -179,5 +184,6 @@ if __name__ == '__main__':
 
     final_df = pd.concat(to_be_inserted)
 
+    import IPython; IPython.embed(); import sys; sys.exit()
     # write table into BQ
-    bqclient.df_to_bq(final_df, hist_table_ref)
+    # bqclient.df_to_bq(final_df, hist_table_ref)

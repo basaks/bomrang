@@ -7,7 +7,6 @@ from pathlib import Path
 from joblib import Parallel, delayed
 import numpy as np
 import pandas as pd
-from datetime import datetime
 from google.cloud.bigquery import TableReference
 from gcputils.bqclient import BQClient
 
@@ -84,7 +83,7 @@ def __df_nan_mean(dfs: List[pd.DataFrame], weights: List[float]) \
 
     # TODO: make sure at least 3 stations have data
     for c in dfs[0].columns:
-        data = np.vstack([df[c] for df in dfs])
+        data = np.vstack([df[c] for df in dfs]).astype(np.float32)
         masked_data = np.ma.masked_array(data=data, mask=np.isnan(data),
                                          dtype=np.float32)
         avg_data = np.ma.average(masked_data, weights=weights, axis=0)
@@ -136,7 +135,7 @@ if __name__ == '__main__':
         historical_weather = download_all_stations_data(stations)
         pickle.dump(historical_weather, open(weather_file_on_disc, 'wb'))
 
-    all_postcodes_table = 'historical_weather_08_27'
+    all_postcodes_table = 'historical_weather'
 
     hist_table_ref = TableReference(dataset_ref_, all_postcodes_table)
 
@@ -154,7 +153,6 @@ if __name__ == '__main__':
     to_be_inserted = []
 
     for i, p in enumerate(postcodes.itertuples()):
-        print("=======Postcode: "*3, p)
         try:
             lat_long = (float(p.lat), float(p.long))
             log.info(f"Interpolating data for postcode {p.postcode} and "
@@ -184,6 +182,5 @@ if __name__ == '__main__':
 
     final_df = pd.concat(to_be_inserted)
 
-    import IPython; IPython.embed(); import sys; sys.exit()
     # write table into BQ
-    # bqclient.df_to_bq(final_df, hist_table_ref)
+    bqclient.df_to_bq(final_df, hist_table_ref)
